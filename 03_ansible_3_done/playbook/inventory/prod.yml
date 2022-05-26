@@ -1,0 +1,9 @@
+---
+clickhouse:
+  hosts:
+    clickhouse01:
+      ansible_host: docker
+vector:
+  hosts:
+    vector01:
+      ansible_host: docker

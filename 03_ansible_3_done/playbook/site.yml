@@ -1,0 +1,72 @@
+---
+- name: Install Clickhouse
+  hosts: clickhouse
+  handlers:
+    - name: Start clickhouse service
+      become: true
+      ansible.builtin.service:
+        name: clickhouse-server
+        state: restarted
+  tasks:
+    - name: Get clickhouse distrib
+      block:
+        - name: Get clickhouse distrib
+          ansible.builtin.get_url:
+            url: "https://packages.clickhouse.com/rpm/stable/{{ item }}-{{ clickhouse_version }}.noarch.rpm"
+            dest: "./{{ item }}-{{ clickhouse_version }}.rpm"
+            mode: 0644
+          with_items: "{{ clickhouse_packages }}"
+      rescue:
+        - name: Get clickhouse distrib
+          ansible.builtin.get_url:
+            url: "https://packages.clickhouse.com/rpm/stable/clickhouse-common-static-{{ clickhouse_version }}.x86_64.rpm"
+            dest: "./clickhouse-common-static-{{ clickhouse_version }}.rpm"
+            mode: 0644
+    - name: Install clickhouse packages
+      become: true
+      ansible.builtin.yum:
+        name:
+          - clickhouse-common-static-{{ clickhouse_version }}.rpm
+          - clickhouse-client-{{ clickhouse_version }}.rpm
+          - clickhouse-server-{{ clickhouse_version }}.rpm
+      notify: Start clickhouse service
+    - name: Create database
+      ansible.builtin.command: "clickhouse-client -q 'create database logs;'"
+      register: create_db
+      failed_when: create_db.rc != 0 and create_db.rc !=82
+      changed_when: create_db.rc == 0
+
+- name: Try run Vector # Произвольное название play
+  hosts: vector # Перечисление хостов
+  handlers: # Объявление списка handlers
+    - name: restart-vector # Произвольное имя для handler
+      ansible.builtin.service: # Вызов module, обрабатывающегооперации с сервисами
+        name: vector # Имя сервиса
+        state: restarted # Ожидаемый результат работы модуля
+        listen: “restart monitoring” # Группировка handlers длявозможности вызова группы
+    - name: restart-memcached
+      ansible.builtin.service:
+        name: memcached
+        state: restarted
+        listen: “restart monitoring”
+  tasks: # Объявление списка tasks
+    - name: Get Vector version # Произвольное имя для task
+      ansible.builtin.command: vector --version # Что и как необходимосделать
+      register: is_installed # Запись результата в переменную is_installed
+      notify:
+        - Restart Vector # Вызов handler Restart Vector
+      tags:
+        - vector
+        - info
+      changed_when: is_installed != 0
+    - name: Get RPM # Произвольное имя для второй task
+      ansible.builtin.get_url: # Объявление использования module get_url,ниже указание его параметров
+        url: “https://package.timber.io/vector/{{ vector_version }}/vector.rpm”
+        dest: “{{ ansible_user_dir }}/vector.rpm”
+        mode: 0755
+      when:
+        - is_installed is failed
+        - -ansible_distribution == “CentOS”
+      tags:
+        - vector
+        - install
